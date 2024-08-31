@@ -1,17 +1,21 @@
+use std::fmt::Display;
+use num_traits::{checked_pow, CheckedNeg, PrimInt};
+
 pub trait Number {
+    type BinarySumOutput: PrimInt + TryFrom<u32> + From<u32> + Display;
+    type Output: PrimInt + TryFrom<Self::BinarySumOutput> + CheckedNeg;
+
     fn bits(&self) -> &[bool];
+    fn binary_sum_start_at(&self) -> usize;
+    fn is_negative(&self) -> bool;
 
-    // 源码
-    fn decode_original_code(&self) -> isize {
+    fn decode_original_code(&self) -> Self::Output {
         let bits = self.bits();
-        let is_negative: bool = bits[0];
-
-        let result = number_binary_array(bits, 1);
-
-        match isize::try_from(result) {
-            Err(_) => panic!("overflow result: {}\n", result),
-            Ok(number) => if is_negative {
-                -number
+        let result = Self::number_binary_array(bits, self.binary_sum_start_at());
+        match Self::Output::try_from(result) {
+            Err(_) => panic!("overflow when parse {} to Output", result),
+            Ok(number) => if self.is_negative() {
+                number.checked_neg().expect("error when using unary")
             } else {
                 number
             }
@@ -19,48 +23,26 @@ pub trait Number {
         
     }
 
-    // 反码
-    fn decode_ones_complement(&self) -> isize {
+    fn decode_ones_complement(&self) -> Self::Output {
         let bits = self.bits();
-        let is_negative = bits[0];
-
-        let decoded_bits = bits.iter().map(|bit| {
-            if is_negative {
-                !*bit
-            } else {
-                *bit
-            }
-        }).collect::<Vec<bool>>();
-
-        let result = number_binary_array(&decoded_bits, 0);
-        return match isize::try_from(result) {
-            Err(_) => panic!("overflow result: {}\n", result),
-            Ok(number) => if is_negative {
-                -number
+        let result = Self::number_binary_array(bits, self.binary_sum_start_at());
+        match Self::Output::try_from(result) {
+            Err(_) => panic!("overflow when parse {} to Output", result),
+            Ok(number) => if self.is_negative() {
+                number.checked_neg().expect("error when using unary")
             } else {
                 number
             }
         }
     }
 
-    // 补码
-    fn decode_twos_complement(&self) -> isize {
+    fn decode_twos_complement(&self) -> Self::Output {
         let bits = self.bits();
-        let is_negative = bits[0];
-
-        let decoded_bits = bits.iter().map(|bit| {
-            if is_negative {
-                !*bit
-            } else {
-                *bit
-            }
-        }).collect::<Vec<bool>>();
-
-        let result = number_binary_array(&decoded_bits, 0);
-        return match isize::try_from(result) {
-            Err(_) => panic!("overflow result: {}\n", result),
-            Ok(number) => if is_negative {
-                -number + 1
+        let result = Self::number_binary_array(bits, self.binary_sum_start_at());
+        match Self::Output::try_from(result) {
+            Err(_) => panic!("overflow when parse {} to Output", result),
+            Ok(number) => if self.is_negative() {
+                number.checked_neg().expect("error when using unary")
             } else {
                 number
             }
@@ -78,6 +60,34 @@ pub trait Number {
 
         return result;
     }
+
+    fn number_binary_array(bits: &[bool], start: usize) -> Self::BinarySumOutput {
+        let size = bits.len();
+        let pows = (1..=size).rev().map(|n| {
+            let two = Self::BinarySumOutput::try_from(2);
+            match two {
+                Err(_) => panic!("error when parse 2"),
+                Ok(two) => match checked_pow(two, n - 1) {
+                    None => panic!("overflow calculating 2^{}", n - 1),
+                    Some(number) => number
+                }
+            }
+            
+        }).collect::<Vec<_>>();
+    
+        let pows = &pows[start..];
+        let result = bits[start..=(size - 1)].iter()
+            .zip(pows)
+            .map(|(bit, pow)| {
+                if *bit {
+                    *pow
+                } else {
+                    Self::BinarySumOutput::from(0)
+                }
+            }).fold(Self::BinarySumOutput::from(0), |r, x| r + x);
+    
+        return result;
+    }
 }
 
 pub struct UInt32 {
@@ -89,12 +99,34 @@ pub struct Int32 {
 }
 
 impl Number for UInt32 {
+    type Output = u32;
+    type BinarySumOutput = u32;
+
+    fn is_negative(&self) -> bool {
+        return false;
+    }
+    
+    fn binary_sum_start_at(&self) -> usize {
+        return 0;
+    }
+
     fn bits(&self) -> &[bool] {
         return &self.bits;
     }
 }
 
 impl Number for Int32 {
+    type Output = i32;
+    type BinarySumOutput = u32;
+
+    fn is_negative(&self) -> bool {
+        return self.bits[0];
+    }
+
+    fn binary_sum_start_at(&self) -> usize {
+        return 1;
+    }
+
     fn bits(&self) -> &[bool] {
         return &self.bits;
     }
@@ -135,35 +167,4 @@ impl From<u32> for UInt32 {
             bits
         }
     }
-}
-
-// 一个整数的n次幂
-fn pow(x: usize, n: usize) -> usize {
-    let mut result = 1;
-    for _ in 1..=n {
-        result *= x;
-    }
-
-    return result;
-}
-
-// 给定一串二进制数，从 start 计算其代表的数字
-fn number_binary_array(bits: &[bool], start: usize) -> usize {
-    let size = bits.len();
-    let pows = (1..=size).rev().map(|n| {
-        pow(2, n - 1) as usize
-    }).collect::<Vec<usize>>();
-
-    let pows = &pows[start..];
-    let result = bits[start..=(size - 1)].iter()
-        .zip(pows)
-        .map(|(bit, pow)| {
-            if *bit {
-                *pow
-            } else {
-                0
-            }
-        }).fold(0, |r, x| r + x);
-
-    return result;
 }
