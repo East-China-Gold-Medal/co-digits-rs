@@ -3,24 +3,37 @@ use num_traits::{checked_pow, CheckedNeg, Float, PrimInt};
 
 mod integer;
 mod float;
+mod operation;
+mod error;
+mod extension;
+
 pub use integer::*;
 pub use float::*;
+pub use error::*;
+pub use extension::*;
+
 
 pub trait IntegerNumber {
     type BinarySumOutput: PrimInt + TryFrom<u32> + From<u32> + Display;
-    type Output: PrimInt + TryFrom<Self::BinarySumOutput> + CheckedNeg;
-
+    type Output: PrimInt + TryFrom<Self::BinarySumOutput> + TryFrom<Self::Output> + CheckedNeg;
     const BIT_SIZE: usize;
     const BINARY_SUM_START_AT: usize;
 
     fn bits(&self) -> &[bool];
     
-    
     fn is_negative(&self) -> bool;
 
+    // 原码
     fn decode_original_code(&self) -> Self::Output {
-        let bits = self.bits();
-        let result = Self::number_binary_array(bits, Self::BINARY_SUM_START_AT);
+        let bits = if self.is_negative() {
+            self.bits().iter().map(|bit| {
+                !*bit
+            }).collect()
+        } else {
+            Vec::from(self.bits())
+        };
+
+        let result = Self::number_binary_array(bits.iter(), Self::BINARY_SUM_START_AT);
         match Self::Output::try_from(result) {
             Err(_) => panic!("overflow when parse {} to Output", result),
             Ok(number) => if self.is_negative() {
@@ -32,9 +45,17 @@ pub trait IntegerNumber {
         
     }
 
+    // 反码
     fn decode_ones_complement(&self) -> Self::Output {
-        let bits = self.bits();
-        let result = Self::number_binary_array(bits, Self::BINARY_SUM_START_AT);
+        let bits = if self.is_negative() {
+            self.bits().iter().map(|bit| {
+                !*bit
+            }).collect()
+        } else {
+            Vec::from(self.bits())
+        };
+
+        let result = Self::number_binary_array(bits.iter(), Self::BINARY_SUM_START_AT);
         match Self::Output::try_from(result) {
             Err(_) => panic!("overflow when parse {} to Output", result),
             Ok(number) => if self.is_negative() {
@@ -45,13 +66,24 @@ pub trait IntegerNumber {
         }
     }
 
+    // 补码
     fn decode_twos_complement(&self) -> Self::Output {
-        let bits = self.bits();
-        let result = Self::number_binary_array(bits, Self::BINARY_SUM_START_AT);
+        let bits = if self.is_negative() {
+            self.bits().iter().map(|bit| {
+                !*bit
+            }).collect::<Vec<bool>>()
+        } else {
+            Vec::from(self.bits())
+        };
+        
+        let result = Self::number_binary_array(bits.iter(), Self::BINARY_SUM_START_AT);
         match Self::Output::try_from(result) {
             Err(_) => panic!("overflow when parse {} to Output", result),
             Ok(number) => if self.is_negative() {
-                number.checked_neg().expect("error when using unary")
+                /* let neg = number.checked_neg().expect("error when using unary");
+                increment_one(neg) */
+
+                increment_one(number).checked_neg().expect("error when using unary")
             } else {
                 number
             }
@@ -79,7 +111,9 @@ pub trait IntegerNumber {
         return grouped;
     }
 
-    fn number_binary_array(bits: &[bool], start: usize) -> Self::BinarySumOutput {
+    fn number_binary_array<'a, T>(bits: T, start: usize) -> Self::BinarySumOutput 
+    where T: Iterator<Item = &'a bool> + {
+        let bits = bits.collect::<Vec<_>>();
         let size = bits.len();
         let pows = (1..=size).rev().map(|n| {
             let two = Self::BinarySumOutput::try_from(2);
@@ -94,10 +128,10 @@ pub trait IntegerNumber {
         }).collect::<Vec<_>>();
     
         let pows = &pows[start..];
-        let result = bits[start..=(size - 1)].iter()
+        let result = bits[start..].iter()
             .zip(pows)
             .map(|(bit, pow)| {
-                if *bit {
+                if **bit {
                     *pow
                 } else {
                     Self::BinarySumOutput::from(0)
@@ -109,7 +143,7 @@ pub trait IntegerNumber {
 }
 
 pub trait FloatNumber {
-    type Output: Float;
+    type Output: Float + TryFrom<Self::Output> + From<Self::Output>;
     const EXPONENT_SIZE: usize;
     const FRACTION_SIZE: usize;
     const BIT_SIZE: usize;
@@ -123,6 +157,11 @@ pub trait FloatNumber {
     // 阶码
     fn exponent_bits(&self) -> &[bool] {
         return &self.bits()[1..=Self::EXPONENT_SIZE];
+    }
+
+    fn min_exponent_value() -> i32 {
+        let min_exponent = 0;
+        return min_exponent + Self::BIAS;
     }
 
     // 尾数
@@ -158,5 +197,27 @@ pub trait FloatNumber {
         }
 
         return grouped;
+    }
+
+    fn is_zero(&self) -> bool {
+        return self.decode_exponent() < Self::min_exponent_value();
+    }
+
+    fn is_nan(&self) -> bool {
+        return self.exponent_bits().iter().all(|bit| *bit) && self.fraction_bits().iter().any(|bit| *bit);
+    }
+
+    fn is_inf(&self) -> bool {
+        return self.exponent_bits().iter().all(|bit| *bit) && self.fraction_bits().iter().any(|bit| !*bit);
+    }
+
+    fn abs_min_value() -> Self::Output {
+        
+        todo!()
+    }
+
+    fn abs_max_value() -> Self::Output {
+        
+        todo!()
     }
 }

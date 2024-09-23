@@ -2,10 +2,12 @@ use num_traits::checked_pow;
 
 use crate::FloatNumber;
 
+#[derive(Copy, Clone, Debug)]
 pub struct Float32 {
     bits: [bool; 32]
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct Float64 {
     bits: [bool; 64]
 }
